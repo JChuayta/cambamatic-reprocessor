@@ -1,4 +1,10 @@
 const GUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
+const LINE_RE = /(\d+)?[\s\t]?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/gi;
+
+export interface GuidWithIndex {
+  guid: string;
+  index?: number;
+}
 
 export function extractGuids(raw: string): string[] {
   const matches = raw.match(GUID_RE) ?? [];
@@ -11,6 +17,24 @@ export function extractGuids(raw: string): string[] {
       ordered.push(lower);
     }
   }
+  return ordered;
+}
+
+export function extractGuidsWithIndex(raw: string): GuidWithIndex[] {
+  const seen = new Set<string>();
+  const ordered: GuidWithIndex[] = [];
+  let match;
+  
+  while ((match = LINE_RE.exec(raw)) !== null) {
+    const index = match[1] ? parseInt(match[1], 10) : undefined;
+    const guid = match[2].toLowerCase();
+    
+    if (!seen.has(guid)) {
+      seen.add(guid);
+      ordered.push({ guid, index });
+    }
+  }
+  
   return ordered;
 }
 

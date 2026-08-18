@@ -36,6 +36,7 @@ export interface SigningRequest {
   DocumentDirectoryId: string;
   DocumentOwnerComplete: boolean;
   Documents: SigningDocument[];
+  searchIndex?: number;
 }
 
 export interface ReprocessJob {

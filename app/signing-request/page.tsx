@@ -5,7 +5,7 @@ import { useState } from "react";
 import { CheckIcon, ChevronDownIcon, SpinnerIcon, XIcon } from "../components/icons";
 import { RequestCard } from "../components/request-card";
 import { useSigningRequests } from "../context/signing-requests";
-import { buildSignatureSentQuery, extractGuids, extractJsonPayload, rowsToRecords } from "../lib/logs-query";
+import { buildSignatureSentQuery, extractGuidsWithIndex, extractJsonPayload, rowsToRecords } from "../lib/logs-query";
 import { APPINSIGHTS_SCOPE } from "../lib/msal-config";
 import { parseJson } from "../lib/parse-json";
 
@@ -15,6 +15,8 @@ const AZURE_LOGS_URL = process.env.NEXT_PUBLIC_AZURE_LOGS_URL ?? "";
 
 interface LogResult {
   guid: string;
+  index?: number;
+  searchIndex?: number;
   found: boolean;
   record?: Record<string, unknown>;
   payload: string | null;
@@ -59,8 +61,8 @@ export default function SigningRequestPage() {
   }
 
   async function handleSearch() {
-    const guids = extractGuids(logsRaw);
-    if (guids.length === 0) {
+    const guidsWithIndex = extractGuidsWithIndex(logsRaw);
+    if (guidsWithIndex.length === 0) {
       setSearchError("No se encontraron GUIDs válidos en el texto pegado.");
       return;
     }
@@ -73,6 +75,7 @@ export default function SigningRequestPage() {
     try {
       const accessToken = await resolveAccessToken();
 
+      const guids = guidsWithIndex.map(g => g.guid);
       const query = buildSignatureSentQuery(guids);
       const res = await fetch("/api/logs/query", {
         method: "POST",
@@ -93,10 +96,10 @@ export default function SigningRequestPage() {
       const records = rowsToRecords(parsed);
 
       setResults(
-        guids.map((guid) => {
-          const record = records.find((r) => String(r.TextoLog ?? "").toLowerCase().includes(guid));
+        guidsWithIndex.map((item) => {
+          const record = records.find((r) => String(r.TextoLog ?? "").toLowerCase().includes(item.guid));
           const payload = record ? extractJsonPayload(String(record.message ?? record.TextoLog ?? "")) : null;
-          return { guid, found: Boolean(record), record, payload };
+          return { guid: item.guid, index: item.index, found: Boolean(record), record, payload };
         })
       );
     } catch (err) {
@@ -114,7 +117,7 @@ export default function SigningRequestPage() {
       if (r.loaded || !r.found || !r.payload) return r;
       try {
         const parsedRequest = parseJson(r.payload);
-        addRequest(parsedRequest, r.payload);
+        addRequest({ ...parsedRequest, searchIndex: r.index }, r.payload);
         addedCount++;
         return { ...r, loaded: true, loadError: undefined };
       } catch (e) {
@@ -185,7 +188,7 @@ export default function SigningRequestPage() {
                 disabled={loadableCount === 0}
                 className="rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                Cargar todos a la lista {loadableCount > 0 ? `(${loadableCount})` : ""}
+                Cargar a la lista (#{results?.filter((r) => r.found && r.payload && !r.loaded).map((r) => r.index).filter(Boolean).join(", ") || "-"}) {loadableCount > 0 ? `[${loadableCount}]` : ""}
               </button>
             )}
           </div>
@@ -199,6 +202,16 @@ export default function SigningRequestPage() {
               >
                 <span className="text-xs font-medium text-gray-600">
                   Resultados: {results.filter((r) => r.found).length}/{results.length} encontrados
+                  {results.some((r) => !r.found) && (
+                    <span className="text-red-600 font-semibold">
+                      {" · Falta el #"}{
+                        results
+                          .filter((r) => !r.found && r.index)
+                          .map((r) => r.index)
+                          .join(", ")
+                      }
+                    </span>
+                  )}
                   {results.some((r) => r.loaded) && ` · ${results.filter((r) => r.loaded).length} agregados`}
                 </span>
                 <ChevronDownIcon
@@ -211,9 +224,20 @@ export default function SigningRequestPage() {
           {results && resultsExpanded && (
             <div className="space-y-2">
               {results.map((r) => (
-                <div key={r.guid} className="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
+                <div key={r.guid} className={`rounded-xl border overflow-hidden ${
+                  !r.found ? "border-red-200 bg-red-50" : "border-gray-200 bg-gray-50"
+                }`}>
                   <div className="flex items-center justify-between px-4 py-3 gap-3">
-                    <span className="font-mono text-xs text-gray-700 truncate">{r.guid}</span>
+                    <div className="flex items-center gap-3">
+                      {r.index && (
+                        <span className={`font-bold text-sm ${
+                          !r.found ? "text-red-700 bg-red-100" : "text-blue-700 bg-blue-100"
+                        } px-2 py-1 rounded`}>
+                          #{r.index}
+                        </span>
+                      )}
+                      <span className="font-mono text-xs text-gray-700 truncate">{r.guid}</span>
+                    </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span
                         className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${

@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import type { SigningRequest } from "../types/signing-request";
 import { useSigningRequests } from "../context/signing-requests";
-import { DocumentsTable } from "./documents-table";
+import type { SigningRequest } from "../types/signing-request";
 import { CopyButton } from "./copy-button";
-import { SpinnerIcon, CheckIcon, XIcon, ChevronDownIcon, PenIcon, RefreshIcon } from "./icons";
+import { DocumentsTable } from "./documents-table";
+import { CheckIcon, ChevronDownIcon, PenIcon, RefreshIcon, SpinnerIcon, XIcon } from "./icons";
 
 type SignStatus = "idle" | "loading" | "success" | "error";
 
@@ -49,6 +49,7 @@ export function RequestCard({
   const { expandedMap, setExpanded: setGlobalExpanded } = useSigningRequests();
   const expanded = expandedMap[request.DocumentDirectoryId] ?? false;
   const setExpanded = (val: boolean) => setGlobalExpanded(request.DocumentDirectoryId, val);
+  const displayIndex = request.searchIndex ?? (index + 1);
 
   const [signStatus, setSignStatus] = useState<SignStatus>("idle");
   const [signError, setSignError] = useState<string | null>(null);
@@ -120,7 +121,7 @@ export function RequestCard({
       <div className="flex items-center justify-between px-5 py-4 bg-gray-50 border-b border-gray-200">
         <button type="button" onClick={() => setExpanded(!expanded)} className="flex items-center gap-4 flex-1 text-left">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white text-sm font-bold">
-            {index + 1}
+            {displayIndex}
           </span>
           <div>
             <p className="font-mono text-xs text-gray-500 mb-0.5">Dir: {request.DocumentDirectoryId}</p>
