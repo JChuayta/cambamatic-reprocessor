@@ -6,6 +6,7 @@ import type { SigningDocument, ReprocessJob } from "../types/signing-request";
 import { saveJob, getJob } from "../lib/reprocess-jobs";
 import { useSigningRequests } from "../context/signing-requests";
 import { DOCUMENT_NAMES, PARTICIPANT_LABELS, API_BASE } from "../lib/constants";
+import { isMissingInterview } from "../lib/signatories";
 import { SpinnerIcon, CheckIcon, XIcon } from "./icons";
 
 type CellJobs = Record<string, string>; // `${documentId}::${signingRepresentative}` → jobId
@@ -132,8 +133,9 @@ export function DocumentsTable({ docs, directoryId }: { docs: SigningDocument[];
                 {DOCUMENT_NAMES[doc.DocumentType] || doc.TopicName || `Tipo ${doc.DocumentType}`}
               </td>
               {sortedTypes.map((type) => {
-                const hasSignatory = doc.SingSetting.Signatories.some((s) => s.SigningRepresentative === type);
                 const sig = doc.SingSetting.Signatories.find((s) => s.SigningRepresentative === type);
+                const hasSignatory = !!sig;
+                const noInterview = !!sig && isMissingInterview(sig);
                 const jobId = cellJobs[cellKey(doc.DocumentId, type)];
                 const j = jobId ? jobStates[jobId] : undefined;
 
@@ -142,7 +144,7 @@ export function DocumentsTable({ docs, directoryId }: { docs: SigningDocument[];
                 const isError = !!j && (j.manualResult === "failed" || (j.status === "error" && !j.manualResult));
 
                 let btnClass = "bg-blue-600 hover:bg-blue-700"; // idle default
-                if (!hasSignatory) btnClass = "bg-gray-300 cursor-not-allowed";
+                if (!hasSignatory || noInterview) btnClass = "bg-gray-300 cursor-not-allowed";
                 else if (isLoading) btnClass = "bg-yellow-400 cursor-not-allowed";
                 else if (isSuccess) btnClass = "bg-green-500 hover:bg-green-600";
                 else if (isError) btnClass = "bg-red-500 hover:bg-red-600";
@@ -154,7 +156,7 @@ export function DocumentsTable({ docs, directoryId }: { docs: SigningDocument[];
                   >
                     <button
                       type="button"
-                      disabled={!hasSignatory || isLoading}
+                      disabled={!hasSignatory || noInterview || isLoading}
                       onClick={() => sig && reprocessCell(doc, sig)}
                       onContextMenu={(e) => {
                         if (!jobId) return;
@@ -164,6 +166,8 @@ export function DocumentsTable({ docs, directoryId }: { docs: SigningDocument[];
                       title={
                         !hasSignatory
                           ? "Sin firmante"
+                          : noInterview
+                          ? "Sin InterviewId: no se puede reprocesar"
                           : jobId
                           ? "Click: reprocesar · Click derecho: ver detalle"
                           : "Click: reprocesar"

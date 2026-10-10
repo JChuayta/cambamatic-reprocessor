@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { SigningRequest } from "../types/signing-request";
+import { removePhantomCosigners } from "../lib/signatories";
 
 type CellJobs = Record<string, string>; // `${documentId}::${signingRepresentative}` → jobId
 // documentId → array of checked signingRepresentative numbers (Set serialized as array)
@@ -24,6 +25,8 @@ interface State {
 interface ContextValue extends State {
   addRequest: (req: SigningRequest, rawJson: string) => void;
   removeRequest: (index: number) => void;
+  removeCosigner: (index: number) => void;
+  updateRequest: (index: number, req: SigningRequest) => void;
   clearAll: () => void;
   setCellJobs: (directoryId: string, jobs: CellJobs) => void;
   setSelections: (directoryId: string, sels: SelectionsRecord) => void;
@@ -76,6 +79,34 @@ export function SigningRequestsProvider({ children }: { children: ReactNode }) {
     }));
   }
 
+  function removeCosigner(index: number) {
+    setState((prev) => {
+      const req = prev.requests[index];
+      if (!req) return prev;
+      const dir = req.DocumentDirectoryId;
+      const isCosignerKey = (k: string) => k.endsWith("::3");
+      const cellJobs = Object.fromEntries(
+        Object.entries(prev.cellJobsMap[dir] ?? {}).filter(([k]) => !isCosignerKey(k))
+      );
+      return {
+        ...prev,
+        requests: prev.requests.map((r, i) => (i === index ? removePhantomCosigners(r) : r)),
+        cellJobsMap: { ...prev.cellJobsMap, [dir]: cellJobs },
+      };
+    });
+  }
+
+  function updateRequest(index: number, req: SigningRequest) {
+    setState((prev) => {
+      const old = prev.requests[index];
+      if (!old) return prev;
+      return {
+        ...prev,
+        requests: prev.requests.map((r, i) => (i === index ? { ...req, searchIndex: old.searchIndex } : r)),
+      };
+    });
+  }
+
   function clearAll() {
     setState((prev) => ({ ...prev, requests: [], cellJobsMap: {}, selectionsMap: {} }));
   }
@@ -103,7 +134,7 @@ export function SigningRequestsProvider({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider
-      value={{ ...state, addRequest, removeRequest, clearAll, setCellJobs, setSelections, setExpanded }}
+      value={{ ...state, addRequest, removeRequest, removeCosigner, updateRequest, clearAll, setCellJobs, setSelections, setExpanded }}
     >
       {children}
     </Ctx.Provider>

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useSigningRequests } from "../context/signing-requests";
 import type { SigningRequest } from "../types/signing-request";
+import { parseJson } from "../lib/parse-json";
+import { hasPhantomCosigner, isMissingInterview } from "../lib/signatories";
 import { CopyButton } from "./copy-button";
 import { DocumentsTable } from "./documents-table";
 import { CheckIcon, ChevronDownIcon, PenIcon, RefreshIcon, SpinnerIcon, XIcon } from "./icons";
@@ -46,10 +48,34 @@ export function RequestCard({
   index: number;
   onRemove: () => void;
 }) {
-  const { expandedMap, setExpanded: setGlobalExpanded } = useSigningRequests();
+  const { expandedMap, setExpanded: setGlobalExpanded, removeCosigner, updateRequest } = useSigningRequests();
+  const phantomCosigner = hasPhantomCosigner(request);
   const expanded = expandedMap[request.DocumentDirectoryId] ?? false;
   const setExpanded = (val: boolean) => setGlobalExpanded(request.DocumentDirectoryId, val);
   const displayIndex = request.searchIndex ?? (index + 1);
+
+  const [editing, setEditing] = useState(false);
+  const [jsonDraft, setJsonDraft] = useState("");
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
+  function openEditor() {
+    setJsonDraft(JSON.stringify(request, null, 2));
+    setJsonError(null);
+    setEditing(true);
+  }
+
+  function saveJson() {
+    try {
+      updateRequest(index, parseJson(jsonDraft));
+      setSignStatus("idle");
+      setSignError(null);
+      setOwnerStatus({ 2: "idle", 3: "idle" });
+      setOwnerError({ 2: null, 3: null });
+      setEditing(false);
+    } catch (err) {
+      setJsonError(err instanceof Error ? err.message : "JSON inválido.");
+    }
+  }
 
   const [signStatus, setSignStatus] = useState<SignStatus>("idle");
   const [signError, setSignError] = useState<string | null>(null);
@@ -131,6 +157,11 @@ export function RequestCard({
                 {request.Documents.length} {request.Documents.length === 1 ? "documento" : "documentos"}
               </span>
             </p>
+            {phantomCosigner && (
+              <p className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                Codeudor sin InterviewId (posible falso codeudor)
+              </p>
+            )}
           </div>
         </button>
 
@@ -138,15 +169,23 @@ export function RequestCard({
           {([2, 3] as const).map((rep) => {
             const sig = ownerSignatories[rep];
             const status = ownerStatus[rep];
+            const noInterview = !!sig && isMissingInterview(sig);
+            const unavailable = !sig || noInterview;
             return (
               <button
                 key={rep}
                 type="button"
                 onClick={() => handleOwnerRegister(rep)}
-                disabled={!sig || status === "loading"}
-                title={sig ? `Reprocesar ${OWNER_LABELS[rep]}` : `Sin firmante (${OWNER_LABELS[rep]})`}
+                disabled={unavailable || status === "loading"}
+                title={
+                  !sig
+                    ? `Sin firmante (${OWNER_LABELS[rep]})`
+                    : noInterview
+                    ? "Sin InterviewId: no se puede reprocesar"
+                    : `Reprocesar ${OWNER_LABELS[rep]}`
+                }
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed ${
-                  !sig ? "bg-gray-200 text-gray-400" : OWNER_BUTTON_CLASS[status]
+                  unavailable ? "bg-gray-200 text-gray-400" : OWNER_BUTTON_CLASS[status]
                 }`}
               >
                 {status === "loading" ? (
@@ -162,6 +201,25 @@ export function RequestCard({
               </button>
             );
           })}
+          {phantomCosigner && (
+            <button
+              type="button"
+              onClick={() => removeCosigner(index)}
+              title="Quita del JSON los codeudores sin InterviewId antes de firmar"
+              className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600"
+            >
+              <XIcon className="h-3.5 w-3.5" />
+              Quitar codeudor
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => (editing ? setEditing(false) : openEditor())}
+            title="Ver y editar el JSON de la solicitud"
+            className="rounded-lg bg-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-300"
+          >
+            {"{ } JSON"}
+          </button>
           <button
             type="button"
             onClick={handleSign}
@@ -193,6 +251,36 @@ export function RequestCard({
           </button>
         </div>
       </div>
+
+      {editing && (
+        <div className="space-y-2 border-b border-gray-200 bg-gray-50 px-5 py-4">
+          <textarea
+            value={jsonDraft}
+            onChange={(e) => setJsonDraft(e.target.value)}
+            spellCheck={false}
+            rows={18}
+            className="w-full rounded-lg border border-gray-300 bg-white p-3 font-mono text-xs text-gray-800 focus:border-blue-500 focus:outline-none"
+          />
+          {jsonError && <p className="text-xs text-red-700">{jsonError}</p>}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={saveJson}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+            >
+              Guardar cambios
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="rounded-lg bg-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-300"
+            >
+              Cancelar
+            </button>
+            <CopyButton text={jsonDraft} />
+          </div>
+        </div>
+      )}
 
       {signStatus === "error" && signError && (
         <div className="px-5 py-2 bg-red-50 border-b border-red-200 text-xs text-red-700 font-mono">
