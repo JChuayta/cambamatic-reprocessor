@@ -1,17 +1,15 @@
 "use client";
 
-import { useMsal } from "@azure/msal-react";
 import { useState } from "react";
+import { CopyButton } from "../components/copy-button";
 import { CheckIcon, ChevronDownIcon, SpinnerIcon, XIcon } from "../components/icons";
 import { RequestCard } from "../components/request-card";
 import { useSigningRequests } from "../context/signing-requests";
-import { buildSignatureSentQuery, extractGuidsWithIndex, extractJsonPayload, rowsToRecords } from "../lib/logs-query";
-import { APPINSIGHTS_SCOPE } from "../lib/msal-config";
+import { publicEnv } from "../lib/env.public";
+import { extractGuidsWithIndex, extractJsonPayload } from "../lib/logs-query";
 import { parseJson } from "../lib/parse-json";
 
-const TOKEN_STORAGE_KEY = "diagnostico_token";
-
-const AZURE_LOGS_URL = process.env.NEXT_PUBLIC_AZURE_LOGS_URL ?? "";
+const LOGS_URL = publicEnv.dynatraceUrl;
 
 interface LogResult {
   guid: string;
@@ -24,41 +22,25 @@ interface LogResult {
   loadError?: string;
 }
 
+// "Falta el #3" / "Faltan los #3, #5". Si una línea no traía índice, se usa su posición en la lista pegada.
+function describeMissing(results: LogResult[]): string {
+  const labels = results
+    .map((r, i) => ({ r, n: r.index ?? i + 1 }))
+    .filter(({ r }) => !r.found)
+    .map(({ n }) => `#${n}`);
+  if (labels.length === 0) return "";
+  return `${labels.length === 1 ? "Falta el" : "Faltan los"} ${labels.join(", ")}`;
+}
+
 export default function SigningRequestPage() {
   const { requests, addRequest, removeRequest, clearAll } = useSigningRequests();
-  const { instance, accounts } = useMsal();
 
   const [logsRaw, setLogsRaw] = useState("");
-  const [token, setToken] = useState(() =>
-    typeof window === "undefined" ? "" : (sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? "")
-  );
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [results, setResults] = useState<LogResult[] | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [resultsExpanded, setResultsExpanded] = useState(false);
-
-  function handleTokenChange(value: string) {
-    setToken(value);
-    sessionStorage.setItem(TOKEN_STORAGE_KEY, value);
-  }
-
-  async function resolveAccessToken(): Promise<string> {
-    const pasted = token.trim();
-    if (pasted) return pasted.replace(/^Bearer\s+/i, "");
-
-    if (!accounts[0]) {
-      throw new Error(
-        "No hay sesión MSAL activa y no pegaste un token manual. Pega un Bearer token para continuar."
-      );
-    }
-
-    const tokenResponse = await instance.acquireTokenSilent({
-      scopes: [APPINSIGHTS_SCOPE],
-      account: accounts[0],
-    });
-    return tokenResponse.accessToken;
-  }
 
   async function handleSearch() {
     const guidsWithIndex = extractGuidsWithIndex(logsRaw);
@@ -73,32 +55,29 @@ export default function SigningRequestPage() {
     setResultsExpanded(false);
 
     try {
-      const accessToken = await resolveAccessToken();
-
       const guids = guidsWithIndex.map(g => g.guid);
-      const query = buildSignatureSentQuery(guids);
       const res = await fetch("/api/logs/query", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ query }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guids }),
       });
 
       const text = await res.text();
       if (!res.ok) {
-        setSearchError(text || `Error ${res.status}`);
+        let message = text;
+        try {
+          message = JSON.parse(text).error ?? text;
+        } catch {}
+        setSearchError(message || `Error ${res.status}`);
         return;
       }
 
-      const parsed = JSON.parse(text);
-      const records = rowsToRecords(parsed);
+      const records: Record<string, unknown>[] = JSON.parse(text).records ?? [];
 
       setResults(
         guidsWithIndex.map((item) => {
-          const record = records.find((r) => String(r.TextoLog ?? "").toLowerCase().includes(item.guid));
-          const payload = record ? extractJsonPayload(String(record.message ?? record.TextoLog ?? "")) : null;
+          const record = records.find((r) => String(r.content ?? "").toLowerCase().includes(item.guid));
+          const payload = record ? extractJsonPayload(String(record.content ?? "")) : null;
           return { guid: item.guid, index: item.index, found: Boolean(record), record, payload };
         })
       );
@@ -129,6 +108,7 @@ export default function SigningRequestPage() {
     setSearchError(addedCount === 0 ? "No se pudo agregar ningún resultado a la lista." : null);
   }
 
+  const missingText = results ? describeMissing(results) : "";
   const loadableCount = results?.filter((r) => r.found && r.payload && !r.loaded).length ?? 0;
 
   return (
@@ -136,21 +116,21 @@ export default function SigningRequestPage() {
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Solicitudes de firma</h1>
-          {AZURE_LOGS_URL && (
+          {LOGS_URL && (
             <a
-              href={AZURE_LOGS_URL}
+              href={LOGS_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 transition-colors"
             >
-              Abrir logs en Azure Portal y obtener Token ↗
+              Abrir logs en Dynatrace ↗
             </a>
           )}
         </div>
 
         <section className="rounded-xl border border-gray-200 bg-white shadow-sm p-5 space-y-4">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500">
-            Buscar en logs (Application Insights)
+            Buscar en logs (Dynatrace)
           </h2>
           <textarea
             value={logsRaw}
@@ -158,13 +138,6 @@ export default function SigningRequestPage() {
             placeholder={"1\t11111111-1111-1111-1111-111111111111\n2\t22222222-2222-2222-2222-222222222222\n…"}
             rows={4}
             className="w-full rounded-lg border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
-          />
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => handleTokenChange(e.target.value)}
-            placeholder="Bearer token (modo manual, mientras no hay login) — se guarda solo en esta pestaña"
-            className="w-full rounded-lg border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           {searchError && (
             <p className="rounded-lg bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-700">
@@ -194,30 +167,26 @@ export default function SigningRequestPage() {
           </div>
 
           {results && (
-            <div className="pt-2">
+            <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setResultsExpanded((prev) => !prev)}
-                className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-left hover:bg-gray-100 transition-colors"
+                className="flex min-w-0 flex-1 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-left hover:bg-gray-100 transition-colors"
               >
                 <span className="text-xs font-medium text-gray-600">
                   Resultados: {results.filter((r) => r.found).length}/{results.length} encontrados
-                  {results.some((r) => !r.found) && (
-                    <span className="text-red-600 font-semibold">
-                      {" · Falta el #"}{
-                        results
-                          .filter((r) => !r.found && r.index)
-                          .map((r) => r.index)
-                          .join(", ")
-                      }
-                    </span>
-                  )}
+                  {missingText && <span className="text-red-600 font-semibold">{" · "}{missingText}</span>}
                   {results.some((r) => r.loaded) && ` · ${results.filter((r) => r.loaded).length} agregados`}
                 </span>
                 <ChevronDownIcon
-                  className={`h-3.5 w-3.5 text-gray-500 transition-transform ${resultsExpanded ? "rotate-180" : ""}`}
+                  className={`h-3.5 w-3.5 shrink-0 text-gray-500 transition-transform ${resultsExpanded ? "rotate-180" : ""}`}
                 />
               </button>
+              {missingText && (
+                <span title="Copiar los que faltan" className="shrink-0 rounded-lg border border-gray-200 bg-gray-50 p-2">
+                  <CopyButton text={missingText} />
+                </span>
+              )}
             </div>
           )}
 

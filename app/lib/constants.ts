@@ -17,7 +17,3 @@ export const PARTICIPANT_LABELS: Record<number, string> = {
 };
 
 export const API_BASE = "/api/reprocess";
-
-// Server-only: base URL of the upstream signature/business API. Never prefix with
-// NEXT_PUBLIC_, this must stay out of the client bundle. Set in .env.local.
-export const BUSINESS_API_BASE_URL = process.env.BUSINESS_API_BASE_URL ?? "";

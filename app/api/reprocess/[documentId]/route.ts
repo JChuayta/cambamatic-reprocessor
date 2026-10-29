@@ -1,8 +1,8 @@
 import { type NextRequest } from "next/server";
 import { httpsPost } from "../../../lib/https-proxy";
-import { BUSINESS_API_BASE_URL } from "../../../lib/constants";
+import { serverEnv } from "../../../lib/env.server";
 
-const UPSTREAM = `${BUSINESS_API_BASE_URL}/Bsol/BusinessApiSignature/v1/Reprocess/Documents`;
+const UPSTREAM = `${serverEnv.businessApiBaseUrl}/Bsol/BusinessApiSignature/v1/Reprocess/Documents`;
 
 export async function POST(
   req: NextRequest,

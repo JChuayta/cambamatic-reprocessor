@@ -38,24 +38,20 @@ export function extractGuidsWithIndex(raw: string): GuidWithIndex[] {
   return ordered;
 }
 
-export function buildSignatureSentQuery(guids: string[]): string {
-  const guidList = guids.map((g) => `"${g}"`).join(", ");
-  const cases = guids.map((g, i) => `TextoLog has "${g}", ${i + 1}`).join(",\n    ");
+export function isGuid(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value);
+}
 
-  return `union isfuzzy=true
-    availabilityResults, requests, exceptions, pageViews, traces, customEvents, dependencies
-| where timestamp >= ago(24h)
-| extend TextoLog = strcat(
-    columnifexists("messageTemplate", ""), " ",
-    tostring(customDimensions["MessageTemplate"]), " ",
-    columnifexists("message", ""))
-| where TextoLog has "signature sended"
-| where TextoLog has_any (dynamic([${guidList}]))
-| extend Orden = case(
-    ${cases},
-    99)
-| order by Orden asc, timestamp desc
-| take 100`;
+// DQL para Dynatrace (Grail). Los GUIDs deben venir ya validados con isGuid.
+export function buildSignatureSentQuery(guids: string[]): string {
+  const guidFilter = guids.map((g) => `contains(content, "${g}", caseSensitive: false)`).join(" or ");
+
+  return `fetch logs, from: now() - 24h
+| filter contains(content, "signature sended", caseSensitive: false)
+| filter ${guidFilter}
+| sort timestamp desc
+| limit 1000
+| fields timestamp, content`;
 }
 
 export function extractJsonPayload(text: string): string | null {
@@ -87,22 +83,3 @@ export function extractJsonPayload(text: string): string | null {
   return null;
 }
 
-interface AppInsightsQueryResult {
-  tables?: {
-    name: string;
-    columns: { name: string; type: string }[];
-    rows: unknown[][];
-  }[];
-}
-
-export function rowsToRecords(result: AppInsightsQueryResult): Record<string, unknown>[] {
-  const table = result.tables?.[0];
-  if (!table) return [];
-  return table.rows.map((row) => {
-    const record: Record<string, unknown> = {};
-    table.columns.forEach((col, i) => {
-      record[col.name] = row[i];
-    });
-    return record;
-  });
-}
